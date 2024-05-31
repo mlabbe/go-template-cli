@@ -21,6 +21,11 @@ As these changes are use-case driven, the fork is considered permanent.
 
 Note that the docs and tests may break as these changes have not necessarily updated these components thoroughly.
 
+### Fork Roadmap ###
+
+ - add `--vars` option multiple times to specify multiple toml/json files.  Force the decoder to the extension.  This will be mutually exclusive with stdin.
+ - fix partially generated templates when an error occurs in the outfile case; make generation atomic.
+
 ## Usage
 
     # glob in all of the tpl files.
