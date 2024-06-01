@@ -26,7 +26,6 @@ var TemplateOptions = "missingkey=error"
 type state struct {
 	// options
 	defaultTemplateName string
-	files               []string
 	globs               []string
 	templateName        string
 	decoder             decoder
@@ -34,6 +33,7 @@ type state struct {
 	showVersion         bool
 	preservePreamble    bool
 	outputFilename      string
+	varsFilenames       []string
 
 	// internal state
 	flagSet  *pflag.FlagSet
@@ -56,6 +56,7 @@ func new(fs *pflag.FlagSet) *state {
 	fs.StringArrayVarP(&cli.globs, "glob", "g", cli.globs, "template file glob. Can be specified multiple times. Make sure not to shell expand the glob.")
 	fs.StringVarP(&cli.templateName, "name", "n", cli.templateName, "if specified, execute the template with the given name")
 	fs.StringVarP(&cli.outputFilename, "output-file", "o", "", "output filename (outputs to stdout if unspecified)")
+	fs.StringArrayVarP(&cli.varsFilenames, "input-vars", "i", []string{}, "input vars (can be specified multiple times)")
 	fs.VarP(&cli.decoder, "decoder", "d", "decoder to use for input data. Supported values: json, yaml, toml (default \"toml\")")
 	fs.BoolVar(&cli.noNewline, "no-newline", cli.noNewline, "do not print newline at the end of the output")
 	fs.BoolVar(&cli.showVersion, "version", cli.showVersion, "show version information and exit")
@@ -78,6 +79,56 @@ func (cli *state) replaceOutputWriterFromCli(w io.Writer) (io.Writer, error) {
 	return file, err
 }
 
+func mergeData(dest, src map[string]any) {
+	for k, v := range src {
+
+		if srcMap, ok := v.(map[string]any); ok {
+
+			if destMap, ok := dest[k].(map[string]any); ok {
+				// the sub-table exists in both the source and destination already
+				mergeData(destMap, srcMap)
+			} else {
+				dest[k] = srcMap
+			}
+		} else {
+			dest[k] = v
+		}
+	}
+}
+
+// decode all input sources -- all passed-in files, and then any stdin
+func (cli *state) decodeAll(r io.Reader) (any, error) {
+
+	mergedData := make(map[string]any)
+
+	for _, varsPath := range cli.varsFilenames {
+		file, err := os.Open(varsPath)
+		if err != nil {
+			return nil, err
+		}
+		defer file.Close()
+
+		newData, err := cli.decode(file)
+		if err != nil {
+			return nil, err
+		}
+
+		mergeData(mergedData, newData)
+	}
+
+	if r != nil {
+		// finally, merge any data from stdin
+		newData, err := cli.decode(r)
+		if err != nil {
+			return nil, err
+		}
+
+		mergeData(mergedData, newData)
+	}
+
+	return mergedData, nil
+}
+
 // parse the options and input, decode the input and render the result
 func (cli *state) run(args []string, r io.Reader, w io.Writer) (err error) {
 	if err := cli.parse(args); err != nil {
@@ -89,9 +140,9 @@ func (cli *state) run(args []string, r io.Reader, w io.Writer) (err error) {
 		return nil
 	}
 
-	data, err := cli.decode(r)
+	data, err := cli.decodeAll(r)
 	if err != nil {
-		return fmt.Errorf("decode: %w", err)
+		return fmt.Errorf("decode all: %w", err)
 	}
 
 	preamble := ""
@@ -155,21 +206,11 @@ func (cli *state) parseFlagset(rawArgs []string) error {
 func (cli *state) parseFilesAndGlobs() (*template.Template, error) {
 	var (
 		err       error
-		fileIndex uint8
 		globIndex uint8
 	)
 
-	// todo: get files from positional args instead.
 	cli.flagSet.Visit(func(f *pflag.Flag) {
 		switch f.Name {
-		case "file":
-			file := cli.files[fileIndex]
-			cli.template, err = cli.template.ParseFiles(file)
-			if err != nil {
-				err = fmt.Errorf("error parsing file %s: %v", file, err)
-				return
-			}
-			fileIndex++
 		case "glob":
 			glob := cli.globs[globIndex]
 			cli.template, err = cli.template.ParseGlob(glob)
@@ -181,6 +222,7 @@ func (cli *state) parseFilesAndGlobs() (*template.Template, error) {
 		}
 	})
 
+	// positional arguments are paths to templates
 	for _, templatePath := range cli.flagSet.Args() {
 		cli.template, err = cli.template.ParseFiles(templatePath)
 		if err != nil {
@@ -192,16 +234,16 @@ func (cli *state) parseFilesAndGlobs() (*template.Template, error) {
 }
 
 // decode the input stream into context data
-func (cli *state) decode(r io.Reader) (any, error) {
+func (cli *state) decode(r io.Reader) (map[string]any, error) {
 	if r == nil || cli.decoder == nil {
 		return nil, nil
 	}
-	var data any
-	err := cli.decoder(r, &data)
+
+	data, err := cli.decoder(r)
 	return data, err
 }
 
-type decoder func(in io.Reader, out any) error
+type decoder func(in io.Reader) (map[string]any, error)
 
 func (dec decoder) String() string { return "" }
 
@@ -221,38 +263,49 @@ func (dec *decoder) Set(kind string) error {
 	return nil
 }
 
-func decodeYaml(in io.Reader, out any) error {
+func decodeYaml(in io.Reader) (map[string]any, error) {
+	var data map[string]any
+
 	dec := yaml.NewDecoder(in)
 	for {
-		err := dec.Decode(out)
+		err := dec.Decode(&data)
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return data, nil
 }
 
-func decodeToml(in io.Reader, out any) error {
+func decodeToml(in io.Reader) (map[string]any, error) {
+	var data map[string]any
+
 	dec := toml.NewDecoder(in)
-	_, err := dec.Decode(out)
-	return err
+
+	_, err := dec.Decode(&data)
+	if err != nil {
+		return nil, err
+	}
+
+	return data, nil
 }
 
-func decodeJson(in io.Reader, out any) error {
+func decodeJson(in io.Reader) (map[string]any, error) {
+	var data map[string]any
+
 	dec := json.NewDecoder(in)
 	for {
-		err := dec.Decode(out)
+		err := dec.Decode(&data)
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
-			return err
+			return nil, err
 		}
 	}
-	return nil
+	return data, nil
 }
 
 // render a template

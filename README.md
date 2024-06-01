@@ -16,6 +16,7 @@ This is a fork of https://github.com/bluebrown/go-template-cli.  It contains the
  - New option `--preserve-preamble` preserves build edge specification in output file header
  - Remove `--file` option for templates, use positional arguments instead.
  - Previous positional arguments allowing for templates in command line arguments removed.
+ - Call `--input-vars` multiple times to merge multiple variable files (see merging variables)
  
 As these changes are use-case driven, the fork is considered permanent.
 
@@ -23,7 +24,6 @@ Note that the docs and tests may break as these changes have not necessarily upd
 
 ### Fork Roadmap ###
 
- - add `--vars` option multiple times to specify multiple toml/json files.  Force the decoder to the extension.  This will be mutually exclusive with stdin.
  - fix partially generated templates when an error occurs in the outfile case; make generation atomic.
 
 ## Usage
@@ -74,177 +74,17 @@ If you have go installed, you can use the `go install` command to install the bi
 go install github.com/mlabbe/go-template-cli/cmd/tpl@latest
 ```
 
-## Example
+## Merging Variables ##
 
-Review the [examples](https://github.com/bluebrown/go-template-cli/tree/main/assets/examples) directory, for more examples.
+It is possible to have multiple input variable files.  Consider:
 
-```bash
-curl -s https://jsonplaceholder.typicode.com/users | tpl '<table>
-  <caption>My Address Book</caption>
-  <tr>
-    <th>Name</th>
-    <th>Email</th>
-    <th>Phone</th>
-    <th>Address</th>
-  </tr>
-  {{- range . }}
-  <tr>
-    <th>{{ .name }}</th>
-    <td>{{ .email }}</td>
-    <td>{{ .phone }}</td>
-    <td>
-      <ul>
-        {{- range $key, $val := .address }} {{ if ne $key "geo" }}
-        <li><strong>{{ $key }}:</strong> &nbsp; {{ $val }}</li>
-        {{- end -}}
-        {{ end }}
-      </ul>
-    </td>
-  </tr>
-  {{- end -}}
-</table>'
-```
+    tpl --input-vars first.toml --input-vars second.toml < third.toml
+    
+In this case, there are three input variable files.  The merge policy is:
 
-<details>
-<summary>Output</summary>
-
-<table>
-  <caption>My Address Book</caption>
-  <tr>
-    <th>Name</th>
-    <th>Email</th>
-    <th>Phone</th>
-    <th>Address</th>
-  </tr>
-  <tr>
-    <th>Leanne Graham</th>
-    <td>Sincere@april.biz</td>
-    <td>1-770-736-8031 x56442</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Gwenborough</li>
-        <li><strong>street:</strong> &nbsp; Kulas Light</li>
-        <li><strong>suite:</strong> &nbsp; Apt. 556</li>
-        <li><strong>zipcode:</strong> &nbsp; 92998-3874</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Ervin Howell</th>
-    <td>Shanna@melissa.tv</td>
-    <td>010-692-6593 x09125</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Wisokyburgh</li>
-        <li><strong>street:</strong> &nbsp; Victor Plains</li>
-        <li><strong>suite:</strong> &nbsp; Suite 879</li>
-        <li><strong>zipcode:</strong> &nbsp; 90566-7771</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Clementine Bauch</th>
-    <td>Nathan@yesenia.net</td>
-    <td>1-463-123-4447</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; McKenziehaven</li>
-        <li><strong>street:</strong> &nbsp; Douglas Extension</li>
-        <li><strong>suite:</strong> &nbsp; Suite 847</li>
-        <li><strong>zipcode:</strong> &nbsp; 59590-4157</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Patricia Lebsack</th>
-    <td>Julianne.OConner@kory.org</td>
-    <td>493-170-9623 x156</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; South Elvis</li>
-        <li><strong>street:</strong> &nbsp; Hoeger Mall</li>
-        <li><strong>suite:</strong> &nbsp; Apt. 692</li>
-        <li><strong>zipcode:</strong> &nbsp; 53919-4257</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Chelsey Dietrich</th>
-    <td>Lucio_Hettinger@annie.ca</td>
-    <td>(254)954-1289</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Roscoeview</li>
-        <li><strong>street:</strong> &nbsp; Skiles Walks</li>
-        <li><strong>suite:</strong> &nbsp; Suite 351</li>
-        <li><strong>zipcode:</strong> &nbsp; 33263</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Mrs. Dennis Schulist</th>
-    <td>Karley_Dach@jasper.info</td>
-    <td>1-477-935-8478 x6430</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; South Christy</li>
-        <li><strong>street:</strong> &nbsp; Norberto Crossing</li>
-        <li><strong>suite:</strong> &nbsp; Apt. 950</li>
-        <li><strong>zipcode:</strong> &nbsp; 23505-1337</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Kurtis Weissnat</th>
-    <td>Telly.Hoeger@billy.biz</td>
-    <td>210.067.6132</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Howemouth</li>
-        <li><strong>street:</strong> &nbsp; Rex Trail</li>
-        <li><strong>suite:</strong> &nbsp; Suite 280</li>
-        <li><strong>zipcode:</strong> &nbsp; 58804-1099</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Nicholas Runolfsdottir V</th>
-    <td>Sherwood@rosamond.me</td>
-    <td>586.493.6943 x140</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Aliyaview</li>
-        <li><strong>street:</strong> &nbsp; Ellsworth Summit</li>
-        <li><strong>suite:</strong> &nbsp; Suite 729</li>
-        <li><strong>zipcode:</strong> &nbsp; 45169</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Glenna Reichert</th>
-    <td>Chaim_McDermott@dana.io</td>
-    <td>(775)976-6794 x41206</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Bartholomebury</li>
-        <li><strong>street:</strong> &nbsp; Dayna Park</li>
-        <li><strong>suite:</strong> &nbsp; Suite 449</li>
-        <li><strong>zipcode:</strong> &nbsp; 76495-3109</li>
-      </ul>
-    </td>
-  </tr>
-  <tr>
-    <th>Clementina DuBuque</th>
-    <td>Rey.Padberg@karina.biz</td>
-    <td>024-648-3804</td>
-    <td>
-      <ul>
-        <li><strong>city:</strong> &nbsp; Lebsackbury</li>
-        <li><strong>street:</strong> &nbsp; Kattie Turnpike</li>
-        <li><strong>suite:</strong> &nbsp; Suite 198</li>
-        <li><strong>zipcode:</strong> &nbsp; 31428-2261</li>
-      </ul>
-    </td>
-  </tr></table>
-
-</details>
+ - The leftmost file from the cli is loaded first (lowest key precedence)
+ - All files from the cli are loaded in specified sequence
+ - Stdin is loaded last, and has the highest key precedence
+ - If a key is found from two sources, the later one takes precedence
+ - If a table is found in two sources, the keys from both are merged,
+   with the later one taking precedence on any conflictns
