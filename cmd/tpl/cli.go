@@ -13,7 +13,7 @@ import (
 	"github.com/spf13/pflag"
 	"gopkg.in/yaml.v3"
 	"os"
-	"path"
+	"path/filepath"
 )
 
 var version = "github.com/mlabbe/go-template-cli"
@@ -48,15 +48,17 @@ func new(fs *pflag.FlagSet) *state {
 	}
 
 	cli := &state{
-		flagSet:             fs,
-		decoder:             decodeToml,
+		flagSet: fs,
+		decoder: decoder{
+			decodeToml,
+			"toml",
+		},
 		defaultTemplateName: "_gotpl_default",
 	}
 
 	fs.StringArrayVarP(&cli.globs, "glob", "g", cli.globs, "template file glob. Can be specified multiple times. Make sure not to shell expand the glob.")
 	fs.StringVarP(&cli.templateName, "name", "n", cli.templateName, "if specified, execute the template with the given name")
 	fs.StringVarP(&cli.outputFilename, "output-file", "o", "", "output filename (outputs to stdout if unspecified)")
-	fs.StringArrayVarP(&cli.varsFilenames, "input-vars", "i", []string{}, "input vars (can be specified multiple times)")
 	fs.VarP(&cli.decoder, "decoder", "d", "decoder to use for input data. Supported values: json, yaml, toml (default \"toml\")")
 	fs.BoolVar(&cli.noNewline, "no-newline", cli.noNewline, "do not print newline at the end of the output")
 	fs.BoolVar(&cli.showVersion, "version", cli.showVersion, "show version information and exit")
@@ -201,6 +203,32 @@ func (cli *state) parseFlagset(rawArgs []string) error {
 	return nil
 }
 
+// positional args contains zero or more vars files
+func (cli *state) getAllVarsFilesFromArgs() []string {
+
+	varsFiles := make([]string, 0)
+	for _, arg := range cli.flagSet.Args() {
+		if filepath.Ext(arg) == "."+cli.decoder.name {
+			varsFiles = append(varsFiles, arg)
+		}
+	}
+
+	return varsFiles
+}
+
+// positional args contains zero or more template files in addition to zero or more globs.
+// this returns only the vars files, not the globs
+func (cli *state) getAllTemplateFilesFromArgs() []string {
+	tplFiles := make([]string, 0)
+	for _, arg := range cli.flagSet.Args() {
+		if filepath.Ext(arg) != "."+cli.decoder.name {
+			tplFiles = append(tplFiles, arg)
+		}
+	}
+
+	return tplFiles
+}
+
 // parse files and globs in the order they were specified, to align with go's
 // template engine. should be called after parseFlagset
 func (cli *state) parseFilesAndGlobs() (*template.Template, error) {
@@ -222,41 +250,51 @@ func (cli *state) parseFilesAndGlobs() (*template.Template, error) {
 		}
 	})
 
-	// positional arguments are paths to templates
-	for _, templatePath := range cli.flagSet.Args() {
-		cli.template, err = cli.template.ParseFiles(templatePath)
+	for _, tplFile := range cli.getAllTemplateFilesFromArgs() {
+		cli.template, err = cli.template.ParseFiles(tplFile)
 		if err != nil {
-			return nil, fmt.Errorf("error parsing file %s: %v", templatePath, err)
+			return nil, fmt.Errorf("error parsing file %s: %v", tplFile, err)
 		}
 	}
+
+	cli.varsFilenames = cli.getAllVarsFilesFromArgs()
 
 	return cli.template, err
 }
 
 // decode the input stream into context data
 func (cli *state) decode(r io.Reader) (map[string]any, error) {
-	if r == nil || cli.decoder == nil {
+	if r == nil || cli.decoder.fn == nil {
 		return nil, nil
 	}
 
-	data, err := cli.decoder(r)
+	data, err := cli.decoder.fn(r)
 	return data, err
 }
 
-type decoder func(in io.Reader) (map[string]any, error)
+type decoderFunc func(in io.Reader) (map[string]any, error)
 
-func (dec decoder) String() string { return "" }
+type decoder struct {
+	fn   decoderFunc
+	name string
+}
+
+//type decoder func(in io.Reader) (map[string]any, error)
+
+func (dec decoder) String() string {
+	return dec.name
+}
 
 func (dec *decoder) Type() string { return "func" }
 
 func (dec *decoder) Set(kind string) error {
 	switch kind {
 	case "json":
-		*dec = decodeJson
+		dec.fn = decodeJson
 	case "yaml":
-		*dec = decodeYaml
+		dec.fn = decodeYaml
 	case "toml":
-		*dec = decodeToml
+		dec.fn = decodeToml
 	default:
 		return fmt.Errorf("unsupported decoder %q", kind)
 	}
@@ -326,6 +364,15 @@ func (cli *state) render(w io.Writer, data any) error {
 	return nil
 }
 
+func (cli *state) dumpAllTemplateNames() string {
+	s := ""
+	for i, t := range cli.template.Templates() {
+		s += fmt.Sprintf(s, "%d: '%s'\n", i, t.Name())
+	}
+
+	return s
+}
+
 func (cli *state) selectTemplate() (string, error) {
 	templates := cli.template.Templates()
 
@@ -338,20 +385,12 @@ func (cli *state) selectTemplate() (string, error) {
 		return cli.templateName, nil
 	}
 
-	// template name from command line positional args
-	if len(cli.flagSet.Args()) > 0 {
-		templatePath := cli.flagSet.Args()[0]
-		templateFilename := path.Base(templatePath)
-
-		return templateFilename, nil
-	}
-
-	// there's only one template anyway, so just pick it
-	if len(templates) == 1 {
+	// if --name not specified, the first template is it
+	if len(templates) > 0 {
 		return templates[0].Name(), nil
 	}
 
-	return "", fmt.Errorf("the --name flag is required when multiple templates are defined and no default template exists")
+	return "", fmt.Errorf("the --name flag is required when multiple templates are defined and no default template exists.  Existing template names:\n%s", cli.dumpAllTemplateNames())
 }
 
 // construct a base templates with custom functions attached
