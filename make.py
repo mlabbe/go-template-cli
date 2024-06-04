@@ -39,6 +39,9 @@ def get_installed_executable_path(exe):
 
     return path_join(gopath, exe)
 
+def shell_backtick(cmd, shell):
+    return subprocess.run(cmd, capture_output=True, shell=shell).stdout
+
 def get_host_os_tools_bin():
     if is_host_windows():
         target = "win64"

@@ -34,6 +34,7 @@ type state struct {
 	preservePreamble    bool
 	outputFilename      string
 	varsFilenames       []string
+	trusted             bool
 
 	// internal state
 	flagSet  *pflag.FlagSet
@@ -63,6 +64,7 @@ func new(fs *pflag.FlagSet) *state {
 	fs.BoolVar(&cli.noNewline, "no-newline", cli.noNewline, "do not print newline at the end of the output")
 	fs.BoolVar(&cli.showVersion, "version", cli.showVersion, "show version information and exit")
 	fs.BoolVarP(&cli.preservePreamble, "preserve-preamble", "p", cli.preservePreamble, "Preserve build edge specification comments in output file")
+	fs.BoolVar(&cli.trusted, "trusted", false, "security: trusted templates -- allow shell and file access to executing machine")
 
 	return cli
 }
@@ -173,12 +175,6 @@ func (cli *state) run(args []string, r io.Reader, w io.Writer) (err error) {
 	return nil
 }
 
-// parse options and args / files into templates. this method builds up the
-// state of the program. It revolves primarily around the parsed templates. The
-// args are parsed in a specific order:
-//  1. parse the options into the flagset
-//  2. parse positional arguments into the default template
-//  3. parse files and globs in the order specified
 func (cli *state) parse(rawArgs []string) error {
 	if err := cli.parseFlagset(rawArgs); err != nil {
 		return fmt.Errorf("parse raw args: %s", err)
@@ -198,7 +194,17 @@ func (cli *state) parseFlagset(rawArgs []string) error {
 		return err
 	}
 
-	cli.template = baseTemplate(cli.defaultTemplateName)
+	// for from_file operations, get the relative path from the last specified
+	// vars file
+	varsFiles := cli.getAllVarsFilesFromArgs()
+	relativeDir := ""
+	if len(varsFiles) > 0 {
+		relativeDir = filepath.Dir(varsFiles[len(varsFiles)-1])
+		relativeDir, _ = filepath.Abs(relativeDir) // fixme: clean this up
+	}
+	fmt.Printf("Relative dir: %s\n", relativeDir)
+
+	cli.template = baseTemplate(cli.defaultTemplateName, cli.trusted, relativeDir)
 
 	return nil
 }
@@ -366,6 +372,7 @@ func (cli *state) render(w io.Writer, data any) error {
 
 func (cli *state) dumpAllTemplateNames() string {
 	s := ""
+
 	for i, t := range cli.template.Templates() {
 		s += fmt.Sprintf(s, "%d: '%s'\n", i, t.Name())
 	}
@@ -394,10 +401,38 @@ func (cli *state) selectTemplate() (string, error) {
 }
 
 // construct a base templates with custom functions attached
-func baseTemplate(defaultName string) *template.Template {
+func baseTemplate(defaultName string, trusted bool, relativeDir string) *template.Template {
 
 	tpl := template.New(defaultName)
 	tpl = tpl.Option(TemplateOptions)
 	tpl = tpl.Funcs(textfunc.MapClosure(sprig.TxtFuncMap(), tpl, FatalMissingInclude))
+
+	tpl = tpl.Funcs(template.FuncMap{
+		"from_file": func(path string) string {
+			if !trusted {
+				fmt.Fprintf(os.Stderr, "fatal: from_file called, but '--trusted' mode not enabled\n")
+				os.Exit(1)
+			}
+
+			// open this from the relative path of the template, then revert the cwd
+			cwd, err := os.Getwd()
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fatal: could not get cwd")
+				os.Exit(1)
+			}
+			defer os.Chdir(cwd)
+			os.Chdir(relativeDir)
+
+			bytes, err := os.ReadFile(path)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "fatal: from_file failed to read file '%s': %q\n", path, err)
+				cwdInError, _ := os.Getwd()
+				fmt.Fprintf(os.Stderr, "current working directory: '%s'\n", cwdInError)
+				os.Exit(1)
+			}
+
+			return string(bytes)
+		}})
+
 	return tpl
 }

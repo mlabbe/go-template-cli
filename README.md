@@ -18,6 +18,8 @@ This is a fork of https://github.com/bluebrown/go-template-cli.  It contains the
  - Previous positional arguments allowing for templates in command line arguments removed.
  - Positional arguments are now either vars files, or template files, depending on extension.
  - The first template name passed in or globbed is the default, unless overridden by `--name`
+ - Add new `from_file` template function that inserts the contents of a file in the template
+ - Add new `--trusted` flag that limits template functions that can cause harm (see security limitations)
  
 As these changes are use-case driven, the fork is considered permanent.
 
@@ -72,3 +74,11 @@ In this case, there are three input variable files.  The merge policy is:
  - If a key is found from two sources, the later one takes precedence
  - If a table is found in two sources, the keys from both are merged,
    with the later one taking precedence on any conflictns
+
+## Security Limitations ##
+
+Templates have access to function that can leak system state in a manner that may lead to a breach.  For example, Sprig supplies functions to [read the environment](https://masterminds.github.io/sprig/os.html).
+
+The new `from_file` allows any file in the system to be read into a template.  This is disabled unless `--trusted` is passed in.
+
+The bottom line - don't execute arbitrary templates from untrusted sources.
