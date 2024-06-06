@@ -7,6 +7,7 @@ import (
 	"io"
 	"text/template"
 
+	"bytes"
 	"github.com/BurntSushi/toml"
 	"github.com/Masterminds/sprig/v3"
 	"github.com/mlabbe/treasure-map/textfunc"
@@ -69,18 +70,37 @@ func new(fs *pflag.FlagSet) *state {
 	return cli
 }
 
-func (cli *state) replaceOutputWriterFromCli(w io.Writer) (io.Writer, error) {
+// if ultimately writing to a file, replace w with an in-memory buffer.
+// in-memory buffer is only written to file if no error occurs to avoid
+// a truncated partial output
+func (cli *state) replaceOutputWriter(w io.Writer) (io.Writer, *bytes.Buffer, error) {
 
-	if cli.outputFilename == "" {
-		return w, nil
+	if cli.outputIsStdio() {
+		// only buffer non-stdio
+		return w, nil, nil
 	}
 
-	file, err := os.Create(cli.outputFilename)
+	var b bytes.Buffer
+	return &b, &b, nil
+}
+
+func (cli *state) outputIsStdio() bool {
+	return cli.outputFilename == ""
+}
+
+func writeToOutputFile(buf *bytes.Buffer, outputFilename string) error {
+	file, err := os.Create(outputFilename)
 	if err != nil {
-		return nil, err
+		return err
+	}
+	defer file.Close()
+
+	_, err = buf.WriteTo(file)
+	if err != nil {
+		return err
 	}
 
-	return file, err
+	return nil
 }
 
 func mergeData(dest, src map[string]any) {
@@ -151,7 +171,7 @@ func (cli *state) run(args []string, r io.Reader, w io.Writer) (err error) {
 
 	preamble := ""
 	if cli.preservePreamble {
-		if cli.outputFilename == "" {
+		if cli.outputIsStdio() {
 			return fmt.Errorf("--preserve-preamble specified but output is stdout.  Specify output filename with -o")
 		}
 
@@ -161,7 +181,7 @@ func (cli *state) run(args []string, r io.Reader, w io.Writer) (err error) {
 		}
 	}
 
-	w, err = cli.replaceOutputWriterFromCli(w)
+	w, buf, err := cli.replaceOutputWriter(w)
 	if err != nil {
 		return fmt.Errorf("output file: %w", err)
 	}
@@ -170,6 +190,13 @@ func (cli *state) run(args []string, r io.Reader, w io.Writer) (err error) {
 
 	if err := cli.render(w, data); err != nil {
 		return fmt.Errorf("render: %w", err)
+	}
+
+	if buf != nil {
+		err = writeToOutputFile(buf, cli.outputFilename)
+		if err != nil {
+			return fmt.Errorf("file write: %w", err)
+		}
 	}
 
 	return nil
@@ -202,7 +229,6 @@ func (cli *state) parseFlagset(rawArgs []string) error {
 		relativeDir = filepath.Dir(varsFiles[len(varsFiles)-1])
 		relativeDir, _ = filepath.Abs(relativeDir) // fixme: clean this up
 	}
-	fmt.Printf("Relative dir: %s\n", relativeDir)
 
 	cli.template = baseTemplate(cli.defaultTemplateName, cli.trusted, relativeDir)
 
