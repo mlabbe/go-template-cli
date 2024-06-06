@@ -21,15 +21,11 @@ This is a fork of https://github.com/bluebrown/go-template-cli.  It contains the
  - Add new `from_file` template function that inserts the contents of a file in the template
  - Add new `--trusted` flag that limits template functions that can cause harm (see security limitations)
  - In the case of an error while rendering, output files are no longer partially overwritten
+ - New `--alt` command uses alternative template delimiters `[_` and `_]`
  
 As these changes are use-case driven, the fork is considered permanent.
 
 Note that the docs and tests may break as these changes have not necessarily updated these components thoroughly.
-
-### Fork Roadmap ###
-
- - fix partially generated templates when an error occurs in the outfile case; make generation atomic.
- - support alt braces `[_ _]`
 
 ## Usage
 

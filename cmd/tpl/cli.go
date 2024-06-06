@@ -23,6 +23,9 @@ var version = "github.com/mlabbe/go-template-cli"
 var FatalMissingInclude = true
 var TemplateOptions = "missingkey=error"
 
+var AltLeftDelim = "[_"
+var AltRightDelim = "_]"
+
 // the state of the program
 type state struct {
 	// options
@@ -36,6 +39,7 @@ type state struct {
 	outputFilename      string
 	varsFilenames       []string
 	trusted             bool
+	altDelimiters       bool
 
 	// internal state
 	flagSet  *pflag.FlagSet
@@ -66,6 +70,7 @@ func new(fs *pflag.FlagSet) *state {
 	fs.BoolVar(&cli.showVersion, "version", cli.showVersion, "show version information and exit")
 	fs.BoolVarP(&cli.preservePreamble, "preserve-preamble", "p", cli.preservePreamble, "Preserve build edge specification comments in output file")
 	fs.BoolVar(&cli.trusted, "trusted", false, "security: trusted templates -- allow shell and file access to executing machine")
+	fs.BoolVar(&cli.altDelimiters, "alt", false, "Use alt delimiters '[_' and '_]' for templates")
 
 	return cli
 }
@@ -230,7 +235,7 @@ func (cli *state) parseFlagset(rawArgs []string) error {
 		relativeDir, _ = filepath.Abs(relativeDir) // fixme: clean this up
 	}
 
-	cli.template = baseTemplate(cli.defaultTemplateName, cli.trusted, relativeDir)
+	cli.template = baseTemplate(cli.defaultTemplateName, cli.trusted, relativeDir, cli.altDelimiters)
 
 	return nil
 }
@@ -427,7 +432,7 @@ func (cli *state) selectTemplate() (string, error) {
 }
 
 // construct a base templates with custom functions attached
-func baseTemplate(defaultName string, trusted bool, relativeDir string) *template.Template {
+func baseTemplate(defaultName string, trusted bool, relativeDir string, altDelimiters bool) *template.Template {
 
 	tpl := template.New(defaultName)
 	tpl = tpl.Option(TemplateOptions)
@@ -459,6 +464,10 @@ func baseTemplate(defaultName string, trusted bool, relativeDir string) *templat
 
 			return string(bytes)
 		}})
+
+	if altDelimiters {
+		tpl.Delims(AltLeftDelim, AltRightDelim)
+	}
 
 	return tpl
 }
