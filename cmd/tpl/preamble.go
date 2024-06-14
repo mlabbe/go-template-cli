@@ -10,8 +10,8 @@ import (
 // only this number of bytes in the header is scanned for preamble
 // before loading the whole file
 const PreambleBufferSize = 512
-const PreambleSymbol = "-|-"
-const PreambleMagicString = "-|- build-edge:"
+const PreambleSymbol = "||"
+const PreambleMagicString = "|| build-edge:"
 
 func doesContainPreamble(outputPath string) (bool, error) {
 	file, err := os.Open(outputPath)
