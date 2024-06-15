@@ -23,6 +23,7 @@ This is a fork of https://github.com/bluebrown/go-template-cli.  It contains the
  - In the case of an error while rendering, output files are no longer partially overwritten
  - New `--alt` command uses alternative template delimiters `[_` and `_]`
  - New `shell` template function that runs a shell command and returns stdout
+ - Bugfix: non-deterministic template selection when `--name` is not specified
  
 As these changes are use-case driven, the fork is considered permanent.
 

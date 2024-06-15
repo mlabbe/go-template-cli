@@ -426,9 +426,32 @@ func (cli *state) selectTemplate() (string, error) {
 		return cli.templateName, nil
 	}
 
-	// if --name not specified, the first template is it
-	if len(templates) > 0 {
-		return templates[0].Name(), nil
+	// if --name not specified but template filenames explicitly
+	// named, the first template is it
+	templateFiles := cli.getAllTemplateFilesFromArgs()
+	if len(templates) > 0 && len(templateFiles) > 0 {
+
+		// Go's templates have non-deterministic return order due to being internally stored
+		// in a map.
+		//
+		// Workaround:
+		// Find the index of the template that matches the name of the first template passed in.
+		// This relies on the implementation detail where template.ParseFile() produces a
+		// template name that is the the base filename.  Trading one implementation detail
+		// for another.  Hopefully this holds for future Go versions.
+		//
+		// --name is now required if --glob is used.
+		var index = -1
+		for i, tmpl := range templates {
+			if tmpl.Name() == filepath.Base(templateFiles[0]) {
+				index = i
+			}
+		}
+		if index == -1 {
+			return "", fmt.Errorf("unexpected: unable to find the first template. Use --name.")
+		}
+
+		return templates[index].Name(), nil
 	}
 
 	return "", fmt.Errorf("the --name flag is required when multiple templates are defined and no default template exists.  Existing template names:\n%s", cli.dumpAllTemplateNames())
