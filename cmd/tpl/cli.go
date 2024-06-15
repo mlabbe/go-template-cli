@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os/exec"
 	"text/template"
 
 	"bytes"
@@ -15,6 +16,8 @@ import (
 	"gopkg.in/yaml.v3"
 	"os"
 	"path/filepath"
+	"syscall"
+	"time"
 )
 
 var version = "github.com/mlabbe/go-template-cli"
@@ -431,6 +434,14 @@ func (cli *state) selectTemplate() (string, error) {
 	return "", fmt.Errorf("the --name flag is required when multiple templates are defined and no default template exists.  Existing template names:\n%s", cli.dumpAllTemplateNames())
 }
 
+func fatalUnlessTrusted(trusted bool, funcName string) {
+	if !trusted {
+		fmt.Fprintf(os.Stderr, "fatal: %s called, but '--trusted' mode not enabled\n", funcName)
+		os.Exit(1)
+
+	}
+}
+
 // construct a base templates with custom functions attached
 func baseTemplate(defaultName string, trusted bool, relativeDir string, altDelimiters bool) *template.Template {
 
@@ -440,10 +451,7 @@ func baseTemplate(defaultName string, trusted bool, relativeDir string, altDelim
 
 	tpl = tpl.Funcs(template.FuncMap{
 		"from_file": func(path string) string {
-			if !trusted {
-				fmt.Fprintf(os.Stderr, "fatal: from_file called, but '--trusted' mode not enabled\n")
-				os.Exit(1)
-			}
+			fatalUnlessTrusted(trusted, "from_file")
 
 			// open this from the relative path of the template, then revert the cwd
 			cwd, err := os.Getwd()
@@ -463,7 +471,40 @@ func baseTemplate(defaultName string, trusted bool, relativeDir string, altDelim
 			}
 
 			return string(bytes)
-		}})
+		},
+		"shell": func(command string, arg ...string) string {
+
+			fatalUnlessTrusted(trusted, "shell")
+
+			var stdout bytes.Buffer
+			var stderr bytes.Buffer
+
+			cmd := exec.Command(command, arg...)
+			cmd.WaitDelay = time.Minute
+			cmd.Stdout = &stdout
+			cmd.Stderr = &stderr
+
+			err := cmd.Run()
+			if err != nil {
+				// Check if the error is an ExitError, which contains the exit status
+				if exitError, ok := err.(*exec.ExitError); ok {
+					// Retrieve the exit code
+					waitStatus := exitError.Sys().(syscall.WaitStatus)
+					exitCode := waitStatus.ExitStatus()
+
+					fmt.Fprintf(os.Stderr, "fatal: Shell '%s' exited with code: %d\n", command, exitCode)
+
+				} else {
+					fmt.Fprintf(os.Stderr, "fatal: shell failed to run command '%s': %q\n", command, err)
+				}
+
+				fmt.Fprintf(os.Stderr, "stderr: %v\n", stderr.String())
+				os.Exit(1)
+			}
+
+			return stdout.String()
+		},
+	})
 
 	if altDelimiters {
 		tpl.Delims(AltLeftDelim, AltRightDelim)
