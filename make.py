@@ -43,14 +43,7 @@ def shell_backtick(cmd, shell):
     return subprocess.run(cmd, capture_output=True, shell=shell).stdout
 
 def get_host_os_tools_bin():
-    if is_host_windows():
-        target = "win64"
-    else:
-        uname_os = shell_backtick('uname -s', shell=True).lower().decode("utf-8").strip()
-        machine = shell_backtick('uname -m', shell=True).lower().decode("utf-8").strip()
-        target = "%s-%s" % (uname_os, machine)
-
-    return path_join(os.getenv('FTG_PROJECT_ROOT'), 'ftg-tools-bin', target, 'bin')
+    return os.getenv("FTG_TOOLS_BIN_DIR")
 
 def find_arg_0param(expected_arg):
     for arg in sys.argv:
